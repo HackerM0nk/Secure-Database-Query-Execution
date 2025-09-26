@@ -1,0 +1,69 @@
+[
+  {
+    "operation": "insert_many",
+    "collection": "events",
+    "documents": [
+      {
+        "user_id": "user_001",
+        "event_type": "login",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "metadata": {"ip": "192.168.1.100", "user_agent": "Chrome"}
+      },
+      {
+        "user_id": "user_002",
+        "event_type": "page_view",
+        "timestamp": "2024-01-15T10:32:00Z",
+        "metadata": {"page": "/dashboard", "duration": 30}
+      },
+      {
+        "user_id": "user_001",
+        "event_type": "logout",
+        "timestamp": "2024-01-15T11:00:00Z",
+        "metadata": {"session_duration": 1800}
+      }
+    ]
+  },
+  {
+    "operation": "aggregate",
+    "collection": "events",
+    "pipeline": [
+      {
+        "$group": {
+          "_id": "$event_type",
+          "count": {"$sum": 1}
+        }
+      },
+      {
+        "$sort": {"count": -1}
+      }
+    ]
+  },
+  {
+    "operation": "find",
+    "collection": "events",
+    "filter": {
+      "event_type": "login",
+      "timestamp": {
+        "$gte": "2024-01-15T00:00:00Z"
+      }
+    }
+  },
+  {
+    "operation": "aggregate",
+    "collection": "events",
+    "pipeline": [
+      {
+        "$match": {
+          "event_type": "page_view"
+        }
+      },
+      {
+        "$group": {
+          "_id": "$metadata.page",
+          "total_views": {"$sum": 1},
+          "avg_duration": {"$avg": "$metadata.duration"}
+        }
+      }
+    ]
+  }
+]

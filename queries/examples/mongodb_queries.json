@@ -1,0 +1,60 @@
+[
+  {
+    "operation": "insert_one",
+    "collection": "users",
+    "document": {
+      "username": "john_doe",
+      "email": "john@example.com",
+      "profile": {
+        "age": 30,
+        "city": "New York"
+      },
+      "tags": ["developer", "mongodb"]
+    }
+  },
+  {
+    "operation": "insert_one",
+    "collection": "users",
+    "document": {
+      "username": "jane_smith",
+      "email": "jane@example.com",
+      "profile": {
+        "age": 25,
+        "city": "San Francisco"
+      },
+      "tags": ["designer", "ui/ux"]
+    }
+  },
+  {
+    "operation": "find",
+    "collection": "users",
+    "filter": {}
+  },
+  {
+    "operation": "find",
+    "collection": "users",
+    "filter": {
+      "profile.city": "New York"
+    }
+  },
+  {
+    "operation": "update_one",
+    "collection": "users",
+    "filter": {
+      "username": "john_doe"
+    },
+    "update": {
+      "$set": {
+        "email": "john.doe@newdomain.com",
+        "profile.age": 31
+      }
+    }
+  },
+  {
+    "operation": "find",
+    "collection": "users",
+    "filter": {
+      "username": "john_doe"
+    }
+  }
+]
