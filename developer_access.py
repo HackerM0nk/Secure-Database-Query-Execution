@@ -7,7 +7,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import and run the main module
-from src.request_creds_and_run import main
+from src.developer_access import main
 
 if __name__ == "__main__":
     main()

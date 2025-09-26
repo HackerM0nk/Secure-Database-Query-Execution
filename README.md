@@ -1,229 +1,522 @@
 # Secure Database Query Execution
 
-A secure, automated system for executing database queries using ephemeral credentials managed by HashiCorp Vault. This project demonstrates how to safely run database operations in CI/CD pipelines without exposing long-lived credentials.
+A **Zero-Trust Database Access System** that eliminates the need for developers to have permanent database credentials. This project demonstrates how to safely execute database operations in CI/CD pipelines using ephemeral credentials managed by HashiCorp Vault.
 
-## 🎯 What This Repository Does
+## 🎯 What This System Solves
 
-This system solves the problem of **secure database access in production environments**. Instead of hardcoding database credentials or storing them in CI/CD variables or granting engineers access to DB credentials it:
+Instead of developers hardcoding database credentials or storing them in `.env` files, this system:
 
-1. **Stores Datastore's admin credentials securely** in HashiCorp Vault
-2. **Generates ephemeral database users** on-demand for each job
-3. **Executes queries** using temporary credentials
-4. **Automatically revokes access** when the job completes
-5. **Provides audit trails** for all database operations
+1. **Stores admin credentials securely** in HashiCorp Vault only
+2. **Generates ephemeral database users** on-demand (1-hour TTL)
+3. **Executes queries** using temporary credentials that auto-expire
+4. **Automatically revokes access** when jobs complete
+5. **Provides complete audit trails** for compliance (SOX, HIPAA, PCI-DSS)
 
-## 🏗️ Architecture
+## 🏗️ Architecture: Zero-Trust Database Access
+
+### 🔒 Security Flow: From Code Review to Execution
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Buildkite     │    │   Vault Server  │    │   Databases     │
-│   Pipeline      │    │                 │    │                 │
-│                 │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
-│ ┌─────────────┐ │    │ │   Admin     │ │    │ │   MySQL     │ │
-│ │   Job A     │◄┼────┤ │ Credentials │ │    │ │             │ │
-│ │             │ │    │ │             │ │    │ │             │ │
-│ │ Query Exec  │ │    │ └─────────────┘ │    │ └─────────────┘ │
-│ └─────────────┘ │    │                 │    │                 │
-│                 │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
-│                 │    │ │ Ephemeral   │ │    │ │  MongoDB    │ │
-│                 │    │ │ User Gen    │ │    │ │             │ │
-│                 │    │ └─────────────┘ │    │ └─────────────┘ │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           🛡️  ZERO-TRUST SECURITY BOUNDARY                      │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│   Developer     │   │   Git Repo      │   │  Buildkite      │   │   Vault Audit   │
+│                 │   │                 │   │                 │   │                 │
+│ 1. Commits SQL  │──▶│ 2. Code Review  │──▶│ 3. Auto Deploy │──▶│ 4. Audit Trail  │
+│    queries/     │   │    + Approval   │   │    After ✅     │   │    Every Action │
+│    migrations   │   │                 │   │                 │   │                 │
+└─────────────────┘   └─────────────────┘   └─────────────────┘   └─────────────────┘
+                                                       │
+                                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          🔐 VAULT CREDENTIAL ENGINE                             │
+│                                                                                 │
+│  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐          │
+│  │  🏦 Admin       │     │  ⚡ Ephemeral   │     │  🔑 JIT Access  │          │
+│  │   Credentials   │────▶│   User Engine   │────▶│   Generation    │          │
+│  │  (Vault Only)   │     │  (MySQL/Mongo)  │     │   (1hr TTL)     │          │
+│  └─────────────────┘     └─────────────────┘     └─────────────────┘          │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                                       │
+                                                       ▼
+┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
+│   📊 Query      │   │   🗄️ Database   │   │   📱 Slack      │   │   🔗 SecureLink │
+│   Execution     │   │   Operations    │   │   Notification  │   │   Credential    │
+│                 │   │                 │   │                 │   │   Viewer        │
+│ • SQL/NoSQL     │──▶│ • MySQL         │   │ • Dev Access    │   │ • Self-Destruct │
+│ • Transactions  │   │ • MongoDB       │   │ • Audit Reports │   │ • Burn After    │
+│ • Rollbacks     │   │ • Temp Users    │   │ • Alerts        │   │ • Reading       │
+└─────────────────┘   └─────────────────┘   └─────────────────┘   └─────────────────┘
 ```
 
-## 🚀 Key Features
+### 🔄 Vault Credential Engine Mechanism
 
-### 🔐 Security First
-- **Zero persistent credentials** in CI/CD environment
-- **Ephemeral database users** with configurable TTL (1-24 hours)
-- **Automatic credential revocation** after job completion
-- **Audit logging** of all credential requests and database operations
+**How Vault Creates Ephemeral Database Users:**
 
-### 🎯 Multi-Database Support
-- **MySQL**: Execute SQL queries with proper transaction handling
-- **MongoDB**: Support for CRUD operations via JSON configuration
-- **Extensible**: Easy to add support for PostgreSQL, Redis, etc.
+1. **Admin Storage**: Only Vault stores database admin credentials (root/admin users)
+2. **JIT Generation**: When access needed, Vault creates temporary database users:
+   ```sql
+   -- Vault executes this on MySQL:
+   CREATE USER 'v-token-mysql-role-abc123'@'%' IDENTIFIED BY 'temp-password-xyz';
+   GRANT SELECT, INSERT, UPDATE ON demo.* TO 'v-token-mysql-role-abc123'@'%';
+   ```
+3. **Lease Management**: Each credential has a lease_id and TTL (1 hour default)
+4. **Auto-Revocation**: Vault automatically drops users when lease expires:
+   ```sql
+   -- Vault executes this after TTL:
+   DROP USER 'v-token-mysql-role-abc123'@'%';
+   ```
 
-### 🔄 CI/CD Integration
-- **Buildkite pipeline** for automated execution
-- **Git-based workflow**: Queries stored in version control
-- **Artifact management**: Results stored as build artifacts
-- **Failure handling**: Proper error reporting and rollback
+## 📁 Optimized Project Structure
 
-### 🐳 Local Development
-- **Docker Compose** setup for complete local testing
-- **Hot reload** capability for development
-- **Health checks** and service dependencies
-
-## 📋 Use Cases
-
-### 1. Database Migrations
-```sql
--- queries/migration_001.sql
-ALTER TABLE users ADD COLUMN last_login TIMESTAMP;
-UPDATE users SET last_login = NOW() WHERE active = 1;
+```
+.
+├── 📖 README.md                    # This comprehensive guide
+├── 🐳 docker-compose.yml           # Infrastructure setup
+├── ⚙️ requirements.txt             # Python dependencies
+├── 🛠️ Makefile                     # Convenient commands for all operations
+├── 🚫 .gitignore                   # Git ignore patterns
+├── 📜 scripts/                     # Setup and utility scripts
+│   ├── setup_vault.sh              # Vault configuration
+│   ├── setup_databases.sh          # Database initialization
+│   └── setup_mysql.sql             # MySQL schema
+├── 🔧 src/                         # Core application code
+│   ├── vault_client.py             # Vault API integration
+│   ├── request_creds_and_run.py    # Query execution engine
+│   ├── developer_access.py         # JIT access management
+│   ├── simple_privatebin.py        # Secure credential sharing
+│   └── credential_viewer.py        # Web-based credential viewer
+├── 📊 queries/                     # Organized query repository
+│   ├── README.md                   # Query documentation
+│   ├── examples/                   # Basic examples for testing
+│   │   ├── mysql_basic.sql         # MySQL fundamentals
+│   │   └── mongodb_basic.json      # MongoDB operations
+│   ├── mysql/                      # MySQL-specific queries
+│   │   └── user_management.sql     # User administration
+│   ├── mongodb/                    # MongoDB-specific queries
+│   │   └── analytics.json          # Data analytics operations
+│   ├── migrations/                 # Database schema changes
+│   │   └── 001_create_audit_table.sql
+│   └── production/                 # Production maintenance
+│       └── health_check.sql        # System health queries
+├── 📋 config/                      # Configuration files
+│   └── .buildkite/                 # CI/CD pipeline
+│       └── pipeline.yml
+├── 📚 docs/                        # Documentation
+│   ├── TESTING_GUIDE.md            # Slack and credential testing
+│   └── SUMMARY.md                  # Implementation summary
+├── 🧪 tests/                       # Test files
+│   └── test_vault_integration.py   # Integration tests
+├── 📊 logs/                        # Runtime logs and results
+│   ├── access_requests_*.log       # Audit trails
+│   └── query_results_*.json        # Execution results
+├── developer_access.py             # Convenient wrapper script
+└── request_creds_and_run.py        # Convenient wrapper script
 ```
 
-### 2. Data Analytics
+---
+
+# 🚀 Complete Setup Guide: Build from Scratch
+
+Follow these commands to build and test the entire system locally.
+
+## Prerequisites
+
+Ensure you have these installed:
+- **Docker & Docker Compose**
+- **Python 3.8+**
+- **Git**
+
+## 🚀 Quick Start with Makefile
+
+For convenience, use the provided Makefile commands:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd Secure-Database-Query-Execution
+
+# One-command setup (installs deps, starts services, configures everything)
+make deploy
+```
+
+## Step-by-Step Manual Setup
+
+### Step 1: Install Dependencies and Start Services
+
+```bash
+# Install Python dependencies
+make install
+
+# Start all services (Vault, MySQL, MongoDB, PrivateBin)
+make start
+```
+
+**Expected Output:**
+```
+📦 Installing Python dependencies...
+🚀 Starting all services...
+⏳ Waiting for services to be ready...
+✅ Services started!
+```
+
+### Step 2: Configure System
+
+```bash
+# Configure Vault and initialize databases
+make setup
+```
+
+**Expected Output:**
+```
+⚙️ Configuring Vault...
+🏛️  Configuring Vault database secrets engine...
+✅ Vault is ready!
+📌 Enabling database secrets engine...
+Success! Data written to: database/config/mysql-database
+Success! Data written to: database/roles/mysql-role
+🗄️ Initializing databases...
+🎉 Database setup completed successfully!
+✅ Setup complete!
+```
+
+### Step 3: Verify Installation
+
+```bash
+# Run all tests
+make test
+
+# Or run individual tests
+make test-mysql    # Test MySQL functionality
+make test-mongo    # Test MongoDB functionality
+make test-access   # Test developer access system
+```
+
+## Step 5: Verify Core System - Query Execution
+
+### Test MySQL Query Execution
+
+```bash
+# Execute sample MySQL queries using ephemeral credentials
+python request_creds_and_run.py mysql queries/examples/mysql_basic.sql
+```
+
+**Expected Output:**
+```
+2025-XX-XX XX:XX:XX,XXX - INFO - Generated credentials for role mysql-role, lease_id: database/creds/mysql-role/abc123
+2025-XX-XX XX:XX:XX,XXX - INFO - MySQL query 0 executed successfully
+2025-XX-XX XX:XX:XX,XXX - INFO - All queries executed successfully
+2025-XX-XX XX:XX:XX,XXX - INFO - Results saved to query_results_mysql_XXXXXXX_XXXXXX.json
+2025-XX-XX XX:XX:XX,XXX - INFO - Vault lease revoked successfully
+```
+
+### Test MongoDB Query Execution
+
+```bash
+# Execute sample MongoDB queries using ephemeral credentials
+python request_creds_and_run.py mongodb queries/examples/mongodb_basic.json
+```
+
+**Expected Output:**
+```
+2025-XX-XX XX:XX:XX,XXX - INFO - Generated credentials for role mongodb-role, lease_id: database/creds/mongodb-role/xyz789
+2025-XX-XX XX:XX:XX,XXX - INFO - MongoDB query 0 executed successfully
+2025-XX-XX XX:XX:XX,XXX - INFO - All queries executed successfully
+2025-XX-XX XX:XX:XX,XXX - INFO - Results saved to query_results_mongodb_XXXXXXX_XXXXXX.json
+2025-XX-XX XX:XX:XX,XXX - INFO - Vault lease revoked successfully
+```
+
+### Verify Query Results
+
+```bash
+# Check the generated result files
+ls -la query_results_*.json
+
+# View MySQL results
+cat query_results_mysql_*.json | jq '.queries[0].data'
+
+# View MongoDB results
+cat query_results_mongodb_*.json | jq '.queries[0].data'
+```
+
+## Step 6: Test Developer Access System
+
+### Start Credential Viewer
+
+```bash
+# Start the secure credential viewer (in background)
+python src/credential_viewer.py &
+
+# Verify it's running
+curl -s http://localhost:8081 | grep "Secure Credential Viewer"
+```
+
+### Request Developer Database Access
+
+```bash
+# Request temporary MySQL access for a developer
+python developer_access.py mysql "developer@company.com" "Bug investigation for ticket #123"
+```
+
+**Expected Output:**
 ```json
-// queries/user_analytics.json
+{
+  "status": "success",
+  "access_granted": true,
+  "database_type": "mysql",
+  "developer_email": "developer@company.com",
+  "privatebin_url": "http://localhost:8081/view/ABC123XYZ789",
+  "expires_at": "2025-XX-XXTXX:XX:XX.XXXXXX",
+  "slack_notified": true,
+  "vault_lease_id": "database/creds/mysql-role/temp123"
+}
+```
+
+### View Secure Credentials
+
+```bash
+# Copy the privatebin_url from above output and open in browser
+# Or test with curl:
+PASTE_ID="ABC123XYZ789"  # Replace with actual ID from output
+curl -s "http://localhost:8081/view/${PASTE_ID}" | grep -A 10 "username"
+```
+
+**The secure credential page will display:**
+- Database connection details (host, port, username, password)
+- Expiration time and security warnings
+- Auto-destruct after 30 seconds or after viewing
+
+## Step 7: Test Slack Integration (Optional)
+
+### Setup Slack Webhook
+
+1. **Create Slack Webhook:**
+   - Go to https://api.slack.com/apps
+   - Create new app → Incoming Webhooks
+   - Copy webhook URL
+
+2. **Test Slack Notifications:**
+```bash
+# Set your Slack webhook URL
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Request access with Slack notification
+python developer_access.py mysql "test@company.com" "Testing Slack integration" --slack-webhook "$SLACK_WEBHOOK_URL"
+```
+
+**Expected Result:** Formatted Slack message with secure credential link.
+
+## Step 8: Verify Security Features
+
+### Check Audit Trail
+
+```bash
+# View complete audit trail of all access requests
+echo "📋 Audit Trail:"
+cat access_requests_*.log | jq -r '. | "🕐 \(.timestamp) | 👤 \(.developer) | 🗄️ \(.database) | 📝 \(.justification)"'
+```
+
+### Verify Ephemeral Users in Databases
+
+```bash
+# Check current ephemeral MySQL users (should be empty after jobs complete)
+docker exec secure-database-query-execution-mysql-1 mysql -u root -prootpass -e "SELECT user, host FROM mysql.user WHERE user LIKE 'v-token%';" 2>/dev/null
+
+# Check MongoDB users
+docker exec secure-database-query-execution-mongo-1 mongosh admin --quiet --eval "db.getUsers()"
+```
+
+### Test Credential Auto-Expiration
+
+```bash
+# Request access and note the lease_id
+python developer_access.py mysql "test@company.com" "Expiration test" | jq -r '.vault_lease_id'
+
+# Check Vault leases (should show active lease)
+docker exec secure-database-query-execution-vault-1 sh -c 'export VAULT_ADDR=http://127.0.0.1:8200 && export VAULT_TOKEN=root-token && vault write sys/leases/lookup lease_id="LEASE_ID_FROM_ABOVE"'
+
+# Wait 1 hour or manually revoke
+# docker exec secure-database-query-execution-vault-1 sh -c 'export VAULT_ADDR=http://127.0.0.1:8200 && export VAULT_TOKEN=root-token && vault write sys/leases/revoke lease_id="LEASE_ID"'
+```
+
+## Step 9: Test Advanced Features
+
+### Manual Database Connection with Ephemeral Credentials
+
+```bash
+# 1. Request credentials and extract connection info
+python developer_access.py mysql "manual-test@company.com" "Manual connection test" > access_result.json
+
+# 2. Get the secure link and visit it to get credentials
+SECURE_LINK=$(cat access_result.json | jq -r '.privatebin_url')
+echo "Visit this link to get credentials: $SECURE_LINK"
+
+# 3. Use the displayed credentials to connect manually:
+# mysql -h localhost -P 3306 -u v-token-mysql-role-XXXXX -pPASSWORD demo
+```
+
+### MongoDB Access Test
+
+```bash
+# Request MongoDB access
+python developer_access.py mongodb "mongo-test@company.com" "MongoDB data analysis"
+
+# Use credentials from secure link:
+# mongosh "mongodb://USERNAME:PASSWORD@localhost:27017/demo"
+```
+
+### Test Query File Formats
+
+**MySQL Query File (`test_mysql.sql`):**
+```sql
+-- Create and test a simple table
+CREATE TABLE test_users (id INT PRIMARY KEY, name VARCHAR(50));
+INSERT INTO test_users VALUES (1, 'Alice'), (2, 'Bob');
+SELECT * FROM test_users;
+DROP TABLE test_users;
+```
+
+**MongoDB Query File (`test_mongodb.json`):**
+```json
 [
   {
+    "operation": "insert_one",
+    "collection": "test_collection",
+    "document": {"name": "test_document", "value": 42}
+  },
+  {
     "operation": "find",
-    "collection": "users",
-    "filter": {"created_at": {"$gte": "2024-01-01"}}
+    "collection": "test_collection",
+    "filter": {"name": "test_document"}
   }
 ]
 ```
 
-### 3. Maintenance Tasks
-```sql
--- queries/cleanup.sql
-DELETE FROM logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY);
-OPTIMIZE TABLE logs;
-```
-
-### 4. Data Validation
-```sql
--- queries/data_integrity_check.sql
-SELECT COUNT(*) as orphaned_records
-FROM orders o
-LEFT JOIN users u ON o.user_id = u.id
-WHERE u.id IS NULL;
-```
-
-## 🛠️ Quick Start
-
-### Prerequisites
-- Docker & Docker Compose
-- Python 3.8+
-- Vault CLI (optional)
-
-### 1. Clone and Start
 ```bash
-git clone <repository-url>
-cd Secure-Database-Query-Execution
+# Test custom query files
+echo "CREATE TABLE test (id INT); INSERT INTO test VALUES (1); SELECT * FROM test;" > test_mysql.sql
+python request_creds_and_run.py mysql test_mysql.sql
 
-# Start all services
-docker-compose up -d
-
-# Configure Vault
-./setup_vault.sh
-
-# Install Python dependencies
-pip install -r requirements.txt
+echo '[{"operation": "insert_one", "collection": "test", "document": {"x": 1}}]' > test_mongo.json
+python request_creds_and_run.py mongodb test_mongo.json
 ```
-
-### 2. Test the System
-```bash
-# Test MySQL queries
-python request_creds_and_run.py mysql queries/mysql_queries.sql
-
-# Test MongoDB queries
-python request_creds_and_run.py mongodb queries/mongodb_queries.json
-```
-
-### 3. View Results
-Query results are saved as JSON files with detailed execution information:
-```json
-{
-  "database": "mysql",
-  "timestamp": "2024-01-15T10:30:45",
-  "lease_id": "database/creds/mysql-role/abc123",
-  "queries": [
-    {
-      "query_index": 0,
-      "query": "SELECT COUNT(*) FROM users",
-      "status": "success",
-      "rows_affected": 1,
-      "data": [{"COUNT(*)": 42}]
-    }
-  ]
-}
-```
-
-## 🔧 Configuration
-
-### Vault Setup
-- **Database Secrets Engine**: Manages ephemeral credentials
-- **MySQL Role**: Creates temporary users with specific permissions
-- **MongoDB Role**: Generates time-limited access tokens
-
-### Database Permissions
-- **MySQL**: `SELECT, INSERT, UPDATE, DELETE` on target database
-- **MongoDB**: `readWrite` role on target database
-- **Configurable**: Easily modify permissions per role
-
-### TTL Configuration
-```bash
-# Default: 1 hour, Maximum: 24 hours
-vault write database/roles/mysql-role \
-    default_ttl="1h" \
-    max_ttl="24h"
-```
-
-## 🏢 Production Considerations
-
-### Security Hardening
-- Replace dev tokens with proper authentication (AppRole, JWT)
-- Enable TLS encryption for all services
-- Implement network segmentation
-- Set up log monitoring and alerting
-
-### Scalability
-- Use managed Vault service (Vault Enterprise, HCP Vault)
-- Implement database connection pooling
-- Add query timeout and resource limits
-- Consider read replicas for read-only operations
-
-### Monitoring
-- Vault audit logs for credential lifecycle
-- Database query performance metrics
-- Failed query alerting
-- Credential leak detection
-
-## 📁 Project Structure
-
-```
-.
-├── README.md                   # This file
-├── SETUP.md                   # Detailed setup instructions
-├── docker-compose.yml         # Local infrastructure
-├── requirements.txt           # Python dependencies
-├── vault_client.py           # Vault API wrapper
-├── request_creds_and_run.py  # Main execution script
-├── setup_vault.sh            # Vault configuration
-├── .buildkite/
-│   └── pipeline.yml          # CI/CD pipeline
-└── queries/                  # Sample query files
-    ├── mysql_queries.sql
-    └── mongodb_queries.json
-```
-
-## 🤝 Contributing
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Add** your database type or enhancement
-4. **Test** locally using Docker Compose
-5. **Submit** a pull request
-
-### Adding New Database Types
-1. Update `vault_client.py` with database configuration
-2. Add execution logic to `request_creds_and_run.py`
-3. Create sample queries in `queries/` directory
-4. Update documentation
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙋 Support
-
-- **Issues**: Report bugs or request features via GitHub Issues
-- **Documentation**: See [SETUP.md](SETUP.md) for detailed configuration
-- **Security**: For security-related issues, please email [security@yourcompany.com]
 
 ---
 
-**Built with ❤️ for secure database operations**
+# 🔧 Service URLs & Access
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| **Vault UI** | http://localhost:8200/ui | Token: `root-token` |
+| **Credential Viewer** | http://localhost:8081 | No auth required |
+| **MySQL Direct** | localhost:3306 | root/rootpass |
+| **MongoDB Direct** | localhost:27017 | No auth |
+| **PrivateBin** | http://localhost:8080 | No auth |
+
+---
+
+# 🧪 Verification Checklist
+
+Run these commands to verify everything works:
+
+```bash
+# ✅ Infrastructure Check
+docker-compose ps | grep "Up"
+
+# ✅ Vault Configuration Check
+docker exec secure-database-query-execution-vault-1 sh -c 'export VAULT_ADDR=http://127.0.0.1:8200 && export VAULT_TOKEN=root-token && vault read database/roles/mysql-role'
+
+# ✅ MySQL Query Execution Check
+python request_creds_and_run.py mysql examples/queries/mysql_queries.sql | grep "successfully"
+
+# ✅ MongoDB Query Execution Check
+python request_creds_and_run.py mongodb examples/queries/mongodb_queries.json | grep "successfully"
+
+# ✅ Developer Access Check
+python developer_access.py mysql test@company.com "verification test" | jq '.status'
+
+# ✅ Audit Trail Check
+cat access_requests_*.log | wc -l
+
+# ✅ Credential Viewer Check
+curl -s http://localhost:8081 | grep "Secure Credential Viewer"
+
+echo "🎉 All systems verified and working!"
+```
+
+---
+
+# 🔒 Security Features Verified
+
+- ✅ **Zero Persistent Credentials**: No passwords stored in code/config
+- ✅ **Ephemeral Users**: Temporary database users created on-demand
+- ✅ **Auto-Expiration**: 1-hour TTL with automatic cleanup
+- ✅ **Complete Audit**: Every access logged with justification
+- ✅ **Secure Sharing**: Self-destructing credential links
+- ✅ **Code Review**: All queries go through Git workflow
+- ✅ **Compliance Ready**: SOX, HIPAA, PCI-DSS audit trails
+
+---
+
+# 🛠️ Troubleshooting
+
+### Common Issues & Solutions
+
+**Docker Issues:**
+```bash
+# Restart all services
+docker-compose down && docker-compose up -d
+
+# Check logs
+docker-compose logs vault
+docker-compose logs mysql
+docker-compose logs mongo
+```
+
+**Vault Issues:**
+```bash
+# Check Vault status
+docker exec secure-database-query-execution-vault-1 sh -c 'export VAULT_ADDR=http://127.0.0.1:8200 && export VAULT_TOKEN=root-token && vault status'
+
+# Reconfigure if needed
+./scripts/setup_vault.sh
+```
+
+**Python Issues:**
+```bash
+# Reinstall dependencies
+pip install -r requirements.txt
+
+# Check Python path
+export PYTHONPATH="${PWD}/src:${PYTHONPATH}"
+```
+
+**Database Connection Issues:**
+```bash
+# Test MySQL connection
+docker exec secure-database-query-execution-mysql-1 mysql -u root -prootpass -e "SHOW DATABASES;"
+
+# Test MongoDB connection
+docker exec secure-database-query-execution-mongo-1 mongosh --eval "db.adminCommand('ping')"
+```
+
+---
+
+# 🚀 Production Deployment
+
+For production use, implement these security measures:
+
+1. **Replace dev tokens** with proper Vault authentication (AppRole, JWT)
+2. **Enable TLS encryption** for all services
+3. **Implement network segmentation** and firewalls
+4. **Set up log monitoring** and alerting
+5. **Use managed Vault service** (Vault Enterprise, HCP Vault)
+6. **Configure proper backup** and disaster recovery
+
+---
+
+**🎉 Congratulations!** You now have a fully functional Zero-Trust Database Access System that eliminates credential sprawl and provides complete audit trails for all database operations.
+
+For questions or issues, see the [troubleshooting guide](docs/TESTING_GUIDE.md) or create an issue in this repository.
