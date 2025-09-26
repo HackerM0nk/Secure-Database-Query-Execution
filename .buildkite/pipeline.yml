@@ -1,0 +1,93 @@
+steps:
+  - label: ":mysql: Execute Database Queries"
+    key: "execute-queries"
+    command: |
+      echo "Setting up environment..."
+      pip install -r requirements.txt
+
+      echo "Checking for query files..."
+      if [ -f "queries/mysql_queries.sql" ]; then
+        echo "Executing MySQL queries..."
+        python request_creds_and_run.py mysql queries/mysql_queries.sql --output mysql_results.json
+      fi
+
+      if [ -f "queries/mongodb_queries.json" ]; then
+        echo "Executing MongoDB queries..."
+        python request_creds_and_run.py mongodb queries/mongodb_queries.json --output mongodb_results.json
+      fi
+
+      echo "Query execution completed"
+
+    artifact_paths:
+      - "*_results.json"
+      - "*.log"
+
+    env:
+      VAULT_ADDR: "http://localhost:8200"
+      VAULT_TOKEN: "root-token"
+
+    timeout_in_minutes: 10
+
+    retry:
+      automatic:
+        - exit_status: "*"
+          limit: 1
+
+  - wait
+
+  - label: ":memo: Process Results"
+    key: "process-results"
+    depends_on: "execute-queries"
+    command: |
+      echo "Processing query execution results..."
+
+      # Download artifacts from previous step
+      buildkite-agent artifact download "*_results.json" .
+
+      # Process results and generate summary
+      python -c "
+      import json
+      import glob
+      import os
+
+      result_files = glob.glob('*_results.json')
+      total_queries = 0
+      failed_queries = 0
+
+      for file in result_files:
+          with open(file, 'r') as f:
+              data = json.load(f)
+
+          queries = data.get('queries', [])
+          total_queries += len(queries)
+          failed_queries += len([q for q in queries if q.get('status') == 'error'])
+
+      summary = {
+          'total_queries': total_queries,
+          'failed_queries': failed_queries,
+          'success_rate': ((total_queries - failed_queries) / total_queries * 100) if total_queries > 0 else 0
+      }
+
+      with open('execution_summary.json', 'w') as f:
+          json.dump(summary, f, indent=2)
+
+      print(f'Execution Summary: {summary}')
+      "
+
+      # Check if any queries failed and set appropriate exit code
+      python -c "
+      import json
+      with open('execution_summary.json', 'r') as f:
+          summary = json.load(f)
+
+      if summary['failed_queries'] > 0:
+          print(f'WARNING: {summary[\"failed_queries\"]} queries failed!')
+          exit(1)
+      else:
+          print('All queries executed successfully!')
+      "
+
+    artifact_paths:
+      - "execution_summary.json"
+
+    timeout_in_minutes: 5
