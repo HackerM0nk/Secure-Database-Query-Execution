@@ -14,7 +14,9 @@ Instead of developers hardcoding database credentials or storing them in `.env` 
 
 ## 🏗️ Architecture: Zero-Trust Database Access
 
-### 🔄 Complete End-to-End Security Flow
+### 🔄 Two Core Security Flows
+
+#### 1️⃣ **Automated Query Execution Flow (CI/CD Pipeline)**
 
 ```mermaid
 sequenceDiagram
@@ -23,81 +25,90 @@ sequenceDiagram
     participant BK as 🚀 Buildkite CI
     participant App as 🔧 Query Engine
     participant Vault as 🔐 HashiCorp Vault
-    participant MySQL as 🐬 MySQL Database
-    participant Mongo as 🍃 MongoDB Database
-    participant Slack as 📱 Slack
-    participant Web as 🌐 Secure Viewer
+    participant DB as 🗄️ Database (MySQL/MongoDB)
     participant Audit as 📊 Audit Logs
 
-    Note over Dev,Audit: 🛡️ ZERO-TRUST SECURITY BOUNDARY
+    Note over Dev,Audit: 🛡️ AUTOMATED QUERY EXECUTION PIPELINE
 
-    %% Code Review Flow
-    Dev->>Git: 1. Push SQL queries to queries/
-    Note right of Dev: queries/mysql/analytics.sql<br/>queries/mongodb/reports.json
-    Git->>Git: 2. Code Review & Approval
-    Git->>BK: 3. Trigger CI after merge ✅
+    Dev->>Git: 1. Push queries to queries/ folder
+    Note right of Dev: queries/mysql/analytics.sql<br/>queries/migrations/schema.sql
 
-    %% Production Query Execution Flow
-    BK->>App: 4. Execute: request_creds_and_run.py
+    Git->>Git: 2. Code Review & Approval ✅
+    Git->>BK: 3. Trigger CI job after merge
+
+    BK->>App: 4. Execute: request_creds_and_run.py mysql query.sql
+
     App->>Vault: 5. Request ephemeral credentials
-    Note right of Vault: 🔒 Admin creds stored securely<br/>Only Vault has root access
+    Note right of Vault: 🔒 Only Vault has admin access<br/>No credentials in code/config
 
-    Vault->>MySQL: 6a. CREATE USER 'v-token-abc123'@'%'
-    Vault->>Mongo: 6b. db.createUser({user: "v-token-xyz789"})
-    Note over Vault,Mongo: 🕐 1-hour TTL auto-expiration
+    Vault->>DB: 6. CREATE USER 'v-token-abc123'@'%'
+    Note over Vault,DB: 🕐 1-hour TTL set automatically
 
     Vault-->>App: 7. Return temp credentials + lease_id
-    Note right of App: Username: v-token-mysql-abc123<br/>Password: temp-pass-xyz<br/>Lease: database/creds/mysql-role/abc123
+    Note left of App: username: v-token-mysql-abc123<br/>password: temp-secure-xyz<br/>lease: database/creds/mysql-role/abc123
 
-    App->>MySQL: 8a. Execute SQL with temp user
-    App->>Mongo: 8b. Execute NoSQL with temp user
+    App->>DB: 8. Execute SQL queries with ephemeral user
+    DB-->>App: 9. Return query results
 
-    MySQL-->>App: 9a. Query results
-    Mongo-->>App: 9b. Query results
+    App->>Audit: 10. Log complete execution details
+    Note right of Audit: 📝 Query content, results, timing<br/>Complete compliance trail
 
-    App->>Audit: 10. Log execution details
-    Note right of Audit: 📝 Who, What, When, Results<br/>Full compliance trail
+    App->>Vault: 11. Revoke lease immediately (cleanup)
+    Vault->>DB: 12. DROP USER 'v-token-abc123'@'%'
 
-    App->>Vault: 11. Revoke lease (cleanup)
-    Vault->>MySQL: 12a. DROP USER 'v-token-abc123'@'%'
-    Vault->>Mongo: 12b. db.dropUser("v-token-xyz789")
+    Note over App,DB: 🗑️ Zero credential persistence<br/>✅ Query executed securely
+```
 
-    Note over App,Vault: 🗑️ Zero credential persistence
+#### 2️⃣ **Developer JIT Access Flow (PrivateBin Secure Sharing)**
 
-    %% Developer JIT Access Flow
-    rect rgb(255, 245, 235)
-        Note over Dev,Web: 🔓 Developer JIT Access Flow
-        Dev->>App: 13. Request access: developer_access.py
-        Note right of Dev: "Bug investigation ticket #123"
+```mermaid
+sequenceDiagram
+    participant Dev as 👨‍💻 Developer
+    participant App as 🔧 Access System
+    participant Vault as 🔐 HashiCorp Vault
+    participant DB as 🗄️ Database
+    participant PB as 🔗 PrivateBin Web
+    participant Slack as 📱 Slack
+    participant Audit as 📊 Audit Logs
 
-        App->>Vault: 14. Generate fresh ephemeral creds
-        Vault->>MySQL: 15. CREATE USER 'v-token-dev456'@'%'
-        Vault-->>App: 16. Return dev credentials + lease
+    Note over Dev,Audit: 🔓 DEVELOPER JIT ACCESS SYSTEM
 
-        App->>Web: 17. Create secure credential page
-        Note right of Web: 🔗 Self-destructing link<br/>Burns after 30 seconds
+    Dev->>App: 1. Request access: developer_access.py
+    Note right of Dev: python developer_access.py mysql<br/>"bug-investigation@company.com"<br/>"Debugging user login issue #456"
 
-        App->>Slack: 18. Send DM to developer
-        Note right of Slack: 📱 "DB access granted: [secure-link]"
+    App->>Vault: 2. Generate ephemeral credentials
+    Vault->>DB: 3. CREATE USER 'v-token-dev789'@'%'
+    Note over Vault,DB: 🕐 1-hour TTL for manual access
 
-        App->>Audit: 19. Log access request
-        Note right of Audit: 📋 Developer email, justification,<br/>timestamp, database type
+    Vault-->>App: 4. Return dev credentials + lease_id
 
-        Dev->>Web: 20. Click secure link
-        Web-->>Dev: 21. Display credentials (one-time)
-        Note left of Dev: 💻 Manual connection:<br/>mysql -h localhost -u v-token-dev456 -p
+    App->>PB: 5. Create secure credential page
+    Note right of PB: 🔗 Self-destructing page<br/>Burns after 30 seconds<br/>Or after 1 view
 
-        Note over Web: 🔥 Link self-destructs after viewing
+    PB-->>App: 6. Return secure URL
+    Note left of App: http://localhost:8081/view/ABC123XYZ
 
-        Vault->>MySQL: 22. Auto-revoke after 1 hour
-        Note over Vault,MySQL: ⏰ Automatic cleanup
-    end
+    App->>Slack: 7. Send DM with secure link
+    Note right of Slack: 📱 "Database access granted!<br/>🔗 [secure-link] (expires in 30s)<br/>⏰ Credentials valid for 1 hour"
 
-    %% Security Features
-    rect rgb(240, 255, 240)
-        Note over Dev,Audit: 🛡️ Security Guarantees
-        Note right of Vault: ✅ No hardcoded credentials<br/>✅ Ephemeral users only<br/>✅ Auto-expiration (1hr TTL)<br/>✅ Complete audit trail<br/>✅ Code review required<br/>✅ Self-destructing access<br/>✅ Compliance ready (SOX, HIPAA, PCI)
-    end
+    App->>Audit: 8. Log access request
+    Note right of Audit: 📋 Developer email, justification<br/>Database type, timestamp
+
+    Dev->>PB: 9. Click secure link from Slack
+    PB-->>Dev: 10. Display credentials (one-time only)
+    Note left of Dev: 💻 Connection details shown:<br/>Host: localhost:3306<br/>Username: v-token-dev789<br/>Password: [temp-password]
+
+    Note over PB: 🔥 Page self-destructs after viewing
+
+    Dev->>DB: 11. Manual database connection
+    Note right of Dev: mysql -h localhost -P 3306<br/>-u v-token-dev789 -p[password] demo
+
+    DB-->>Dev: 12. Direct database access for debugging
+
+    Note over Vault,DB: ⏰ After 1 hour: Auto-revocation
+    Vault->>DB: 13. DROP USER 'v-token-dev789'@'%'
+
+    Note over Dev,DB: 🛡️ Zero persistent access<br/>✅ Complete audit trail maintained
 ```
 
 ### 🔄 Vault Credential Engine Mechanism
