@@ -14,41 +14,90 @@ Instead of developers hardcoding database credentials or storing them in `.env` 
 
 ## 🏗️ Architecture: Zero-Trust Database Access
 
-### 🔒 Security Flow: From Code Review to Execution
+### 🔄 Complete End-to-End Security Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           🛡️  ZERO-TRUST SECURITY BOUNDARY                      │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant Dev as 👨‍💻 Developer
+    participant Git as 📁 Git Repository
+    participant BK as 🚀 Buildkite CI
+    participant App as 🔧 Query Engine
+    participant Vault as 🔐 HashiCorp Vault
+    participant MySQL as 🐬 MySQL Database
+    participant Mongo as 🍃 MongoDB Database
+    participant Slack as 📱 Slack
+    participant Web as 🌐 Secure Viewer
+    participant Audit as 📊 Audit Logs
 
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│   Developer     │   │   Git Repo      │   │  Buildkite      │   │   Vault Audit   │
-│                 │   │                 │   │                 │   │                 │
-│ 1. Commits SQL  │──▶│ 2. Code Review  │──▶│ 3. Auto Deploy │──▶│ 4. Audit Trail  │
-│    queries/     │   │    + Approval   │   │    After ✅     │   │    Every Action │
-│    migrations   │   │                 │   │                 │   │                 │
-└─────────────────┘   └─────────────────┘   └─────────────────┘   └─────────────────┘
-                                                       │
-                                                       ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                          🔐 VAULT CREDENTIAL ENGINE                             │
-│                                                                                 │
-│  ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐          │
-│  │  🏦 Admin       │     │  ⚡ Ephemeral   │     │  🔑 JIT Access  │          │
-│  │   Credentials   │────▶│   User Engine   │────▶│   Generation    │          │
-│  │  (Vault Only)   │     │  (MySQL/Mongo)  │     │   (1hr TTL)     │          │
-│  └─────────────────┘     └─────────────────┘     └─────────────────┘          │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                                       │
-                                                       ▼
-┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-│   📊 Query      │   │   🗄️ Database   │   │   📱 Slack      │   │   🔗 SecureLink │
-│   Execution     │   │   Operations    │   │   Notification  │   │   Credential    │
-│                 │   │                 │   │                 │   │   Viewer        │
-│ • SQL/NoSQL     │──▶│ • MySQL         │   │ • Dev Access    │   │ • Self-Destruct │
-│ • Transactions  │   │ • MongoDB       │   │ • Audit Reports │   │ • Burn After    │
-│ • Rollbacks     │   │ • Temp Users    │   │ • Alerts        │   │ • Reading       │
-└─────────────────┘   └─────────────────┘   └─────────────────┘   └─────────────────┘
+    Note over Dev,Audit: 🛡️ ZERO-TRUST SECURITY BOUNDARY
+
+    %% Code Review Flow
+    Dev->>Git: 1. Push SQL queries to queries/
+    Note right of Dev: queries/mysql/analytics.sql<br/>queries/mongodb/reports.json
+    Git->>Git: 2. Code Review & Approval
+    Git->>BK: 3. Trigger CI after merge ✅
+
+    %% Production Query Execution Flow
+    BK->>App: 4. Execute: request_creds_and_run.py
+    App->>Vault: 5. Request ephemeral credentials
+    Note right of Vault: 🔒 Admin creds stored securely<br/>Only Vault has root access
+
+    Vault->>MySQL: 6a. CREATE USER 'v-token-abc123'@'%'
+    Vault->>Mongo: 6b. db.createUser({user: "v-token-xyz789"})
+    Note over Vault,Mongo: 🕐 1-hour TTL auto-expiration
+
+    Vault-->>App: 7. Return temp credentials + lease_id
+    Note right of App: Username: v-token-mysql-abc123<br/>Password: temp-pass-xyz<br/>Lease: database/creds/mysql-role/abc123
+
+    App->>MySQL: 8a. Execute SQL with temp user
+    App->>Mongo: 8b. Execute NoSQL with temp user
+
+    MySQL-->>App: 9a. Query results
+    Mongo-->>App: 9b. Query results
+
+    App->>Audit: 10. Log execution details
+    Note right of Audit: 📝 Who, What, When, Results<br/>Full compliance trail
+
+    App->>Vault: 11. Revoke lease (cleanup)
+    Vault->>MySQL: 12a. DROP USER 'v-token-abc123'@'%'
+    Vault->>Mongo: 12b. db.dropUser("v-token-xyz789")
+
+    Note over App,Vault: 🗑️ Zero credential persistence
+
+    %% Developer JIT Access Flow
+    rect rgb(255, 245, 235)
+        Note over Dev,Web: 🔓 Developer JIT Access Flow
+        Dev->>App: 13. Request access: developer_access.py
+        Note right of Dev: "Bug investigation ticket #123"
+
+        App->>Vault: 14. Generate fresh ephemeral creds
+        Vault->>MySQL: 15. CREATE USER 'v-token-dev456'@'%'
+        Vault-->>App: 16. Return dev credentials + lease
+
+        App->>Web: 17. Create secure credential page
+        Note right of Web: 🔗 Self-destructing link<br/>Burns after 30 seconds
+
+        App->>Slack: 18. Send DM to developer
+        Note right of Slack: 📱 "DB access granted: [secure-link]"
+
+        App->>Audit: 19. Log access request
+        Note right of Audit: 📋 Developer email, justification,<br/>timestamp, database type
+
+        Dev->>Web: 20. Click secure link
+        Web-->>Dev: 21. Display credentials (one-time)
+        Note left of Dev: 💻 Manual connection:<br/>mysql -h localhost -u v-token-dev456 -p
+
+        Note over Web: 🔥 Link self-destructs after viewing
+
+        Vault->>MySQL: 22. Auto-revoke after 1 hour
+        Note over Vault,MySQL: ⏰ Automatic cleanup
+    end
+
+    %% Security Features
+    rect rgb(240, 255, 240)
+        Note over Dev,Audit: 🛡️ Security Guarantees
+        Note right of Vault: ✅ No hardcoded credentials<br/>✅ Ephemeral users only<br/>✅ Auto-expiration (1hr TTL)<br/>✅ Complete audit trail<br/>✅ Code review required<br/>✅ Self-destructing access<br/>✅ Compliance ready (SOX, HIPAA, PCI)
+    end
 ```
 
 ### 🔄 Vault Credential Engine Mechanism
