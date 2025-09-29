@@ -1,6 +1,7 @@
 # Secure Database Query Execution
 
-A **Zero-Trust Database Access System** that eliminates the need for developers to have permanent database credentials. This project demonstrates how to safely execute database operations in CI/CD pipelines using ephemeral credentials managed by HashiCorp Vault.
+A **Zero-Trust Database Access System** that eliminates the need for developers to have permanent database credentials. This project demonstrates how to safely execute database operations in CI/CD pipelines using ephemeral credentials managed by HashiCorp Vault.<img width="1940" height="1312" alt="image" src="https://github.com/user-attachments/assets/81e8481c-14d1-47b4-aac4-094d16f11381" />
+
 
 ## 🎯 What This System Solves
 
