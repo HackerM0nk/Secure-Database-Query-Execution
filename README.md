@@ -580,3 +580,24 @@ For production use, implement these security measures:
 **🎉 Congratulations!** You now have a fully functional Zero-Trust Database Access System that eliminates credential sprawl and provides complete audit trails for all database operations.
 
 For questions or issues, see the [troubleshooting guide](docs/TESTING_GUIDE.md) or create an issue in this repository.
+
+## 🗺️ Visual Architecture Diagram (Excalidraw)
+
+An Excalidraw diagram describing the high-level architecture for this project has been added to the `docs/` folder. You can open and edit it with Excalidraw (web or desktop) or view it in the browser via the Excalidraw app.
+
+- File: `docs/architecture.excalidraw`
+
+How to view/edit:
+
+1. Open the Excalidraw web app at https://excalidraw.com
+2. From the app, choose "Load file" (folder icon) then select the local file `docs/architecture.excalidraw` from this repository.
+3. Edit, export PNG/SVG, or share the diagram as needed.
+
+Quick note: the diagram shows the following components and flows:
+
+- Developer / CI calling `request_creds_and_run.py` or `developer_access.py`
+- `vault_client.py` interacting with Vault to create ephemeral DB users
+- Databases (MySQL, MongoDB) which receive temporary users
+- Audit & results stored in `logs/` and optionally shared via PrivateBin
+
+If you'd like I can also export a PNG or SVG of the diagram and add it to `docs/` for quick preview in GitHub—tell me which format you prefer.
