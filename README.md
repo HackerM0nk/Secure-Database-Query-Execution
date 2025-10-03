@@ -15,9 +15,7 @@ Instead of developers hardcoding database credentials or storing them in `.env` 
 
 ## 🏗️ Architecture: Zero-Trust Database Access
 
-### 🔄 Two Core Security Flows
-
-#### 1️⃣ **Automated Query Execution Flow (CI/CD Pipeline)**
+### 1️⃣ **Automated Query Execution Flow (CI/CD Pipeline)**
 
 ```mermaid
 sequenceDiagram
@@ -60,7 +58,7 @@ sequenceDiagram
     Note over App,DB: 🗑️ Zero credential persistence<br/>✅ Query executed securely
 ```
 
-#### 2️⃣ **Developer JIT Access Flow (PrivateBin Secure Sharing)**
+### 2️⃣ **Developer JIT Access Flow (PrivateBin Secure Sharing)**
 
 ```mermaid
 sequenceDiagram
