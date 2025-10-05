@@ -132,7 +132,7 @@ sequenceDiagram
 
 ```
 .
-├── 📖 README.md                    # This comprehensive guide
+├── 📖 README.md                    # README
 ├── 🐳 docker-compose.yml           # Infrastructure setup
 ├── ⚙️ requirements.txt             # Python dependencies
 ├── 🛠️ Makefile                     # Convenient commands for all operations
@@ -171,8 +171,8 @@ sequenceDiagram
 ├── 📊 logs/                        # Runtime logs and results
 │   ├── access_requests_*.log       # Audit trails
 │   └── query_results_*.json        # Execution results
-├── developer_access.py             # Convenient wrapper script
-└── request_creds_and_run.py        # Convenient wrapper script
+├── developer_access.py             # wrapper script
+└── request_creds_and_run.py        # wrapper script
 ```
 
 ---
